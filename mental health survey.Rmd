@@ -1,0 +1,617 @@
+---
+title: "Mental Health Survey: Exploring the Attitudes and Perceptions of Persons who Underwent Mental Health Treatment"
+author: "Shardha Ramlal"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    latex_engine: xelatex
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(plyr)
+library(officer)
+library(officedown)
+library(tidyverse)
+library(RKaggle)
+library(dplyr)
+library(gtsummary)
+library(flextable)
+library(corrplot)
+library(dlookr)
+library(tinytex)
+library(likert)
+library(skimr)
+library(knitr)
+library(psych)
+library(stringr)
+library(purrr)
+library(broom)
+library(tibble)
+library(sjPlot)
+
+data <- RKaggle::get_dataset("osmi/mental-health-in-tech-survey")
+
+
+# data |> write.csv("data.csv")
+
+# head(data)
+#  
+# dim(data) #1259   27
+
+#explore the dataset
+
+# str(data)
+# 
+# summary(data)
+
+
+# drop the missing data from the 
+# data <- data[complete.cases(data),]
+# 
+# #duplicate cases
+# data <- data[!duplicated(data), ] # 1duplictae
+
+```
+
+# Introduction
+
+Data link & Research Inspiration: <https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey1>
+
+The data was from a 2014 survey that measured attitudes towards mental health as well as frequency of mental health disorders in the workforce, specifically tech workplaces.
+
+Research Question: What are the strongest predictors of mental health illness or certain attitudes towards mental health in the workplace?
+
+# Data Description
+
+Variables include:
+
+- Timestamp
+
+- Age
+
+- Gender
+
+- Country
+
+- state: If you live in the United States, which state or territory do you live in?
+
+- self_employed: Are you self-employed?
+
+- family_history: Do you have a family history of mental illness?
+
+- treatment: Have you sought treatment for a mental health condition?
+
+- work_interfere: If you have a mental health condition, do you feel that it interferes with your work?
+
+- no_employees: How many employees does your company or organization have?
+
+- remote_work: Do you work remotely (outside of an office) at least 50% of the time?
+
+- tech_company: Is your employer primarily a tech company/organization?
+
+- benefits: Does your employer provide mental health benefits?
+
+- care_options: Do you know the options for mental health care your employer provides?
+
+- wellness_program: Has your employer ever discussed mental health as part of an employee wellness program?
+
+- seek_help: Does your employer provide resources to learn more about mental health issues and how to seek help?
+
+- anonymity: Is your anonymity protected if you choose to take advantage of mental health or substance abuse treatment resources?
+
+- leave: How easy is it for you to take medical leave for a mental health condition?
+
+- mental_health_consequence: Do you think that discussing a mental health issue with your employer would have negative consequences?
+
+- phys_health_consequence: Do you think that discussing a physical health issue with your employer would have negative consequences?
+
+- coworkers: Would you be willing to discuss a mental health issue with your coworkers?
+
+- supervisor: Would you be willing to discuss a mental health issue with your direct supervisor(s)?
+
+- mental_health_interview: Would you bring up a mental health issue with a potential employer in an interview?
+
+- phys_health_interview: Would you bring up a physical health issue with a potential employer in an interview?
+
+- mental_vs_physical: Do you feel that your employer takes mental health as seriously as physical health?
+
+- obs_consequence: Have you heard of or observed negative consequences for coworkers with mental health conditions in your workplace?
+
+- comments: Any additional notes or comments
+
+# Exploratory Data Analysis
+
+```{r, echo=FALSE, warning=FALSE}
+
+options(pagedown.timeout = 300)
+
+# overview(data) |>
+#   flextable() |>
+#   autofit() |>
+#   theme_booktabs() |>
+#   set_caption("Dataset Overview and Dimensions")
+# 
+# 
+# skim(data)
+
+#convert all characters to factors
+data <- data |>
+  mutate(across(where(is.character), as.factor))
+
+
+# Generate base skim object
+skim_results <- skim(data)
+
+yank(skim_results, "numeric") |> 
+  as_tibble() |> 
+  select(where(~ !all(is.na(.x)))) |> 
+  mutate(across(where(is.numeric), ~format(.x, scientific = FALSE, digits = 2)))|> kable(format = "markdown")
+
+
+yank(skim_results, "factor") |> 
+  as_tibble() |> 
+  select(where(~ !all(is.na(.x)))) |> 
+  kable(format = "markdown")
+
+
+# library(SmartEDA)
+# 
+# ExpReport(data,Target = "treatment",op_file="Report.html",op_dir=getwd())
+# 
+# 
+# data |> eda_web_report(target = "treatment", subtitle = "Mental Health Survey", 
+#                    output_dir = getwd(), output_file = "EDA_Mental_Health_Survey.html", 
+#                    theme = "blue")
+# 
+#  
+# data |>
+#   diagnose_web_report(subtitle = "treatment", output_dir = getwd(),
+#                         output_file = "Diagn_Mental_Health_Survey.html", 
+#                         theme = "blue", output_format = "html")
+ 
+```
+
+# Data Quality - Completeness
+
+```{r,  echo=FALSE, warning=FALSE}
+plot_na_pareto(data, only_na = TRUE, relative = FALSE, main = NULL)
+
+
+```
+
+Missing data seemed to be concentrated on the work_interfere and self_employed variable.
+The state variable was only applicable for the USA and the comments variable was optional.
+
+# How does missing data look according to treatment?
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(naniar)
+
+data |> gg_miss_var(show_pct=TRUE, facet=treatment)
+
+```
+
+Persons who did not seek mental health treatment before mostly did not appear to have a mental health condition.
+
+# Data Cleaning
+
+We observed there was further cleaning to be done with the dataset:
+
+- There were outliers in Age (value of 329), negative values (-1726, -29 , -1), and persons 5, 8 and 11 years old which were assumed these are errors and the legal working age in the dataset was 18 and over
+- discreprancies in the coding of Gender - f, female, m, male, femake etc.
+
+```{r, echo=FALSE, warning=FALSE}
+
+#age has negatives
+
+data <- data |> mutate(Age = as.integer(Age))
+
+# summary(data$Age)
+
+# data |> select(Age) |> group_by(Age) |> summarise(n=n()) |> arrange(desc(Age)) |> head() |> kable(format = "markdown")
+
+#largest is 329
+
+# data |> select(Age) |> group_by(Age) |> summarise(n=n()) |> arrange((Age))  |> head(10) |> kable(format = "markdown")
+
+
+# -1726, -29	, -1
+#Also has persons 5, 8 and 11 -> not of working age - errors in recording age
+
+
+cleaned_data <- data |> mutate(Age_cleaned = as.integer(Age),
+    Age_cleaned = ifelse(Age_cleaned %in% c(329,5,8,11) | Age_cleaned < 0  , NA, Age_cleaned)
+  )
+
+# data |> select(Gender) |> group_by(Gender) |> summarise(n=n())|> head(10) |> kable(format = "markdown")
+
+cleaned_data <- cleaned_data |> mutate(Gender_cleaned = str_to_lower(trimws(Gender)), 
+    # Standardise categories
+    Gender_cleaned = case_when(
+      # Female
+      Gender_cleaned %in% c("f", "female", "femake", "cis female", "female (cis)",
+                            "cis-female/femme","femail","woman") ~ "Female",
+      # Male
+      Gender_cleaned %in% c("m", "male", "make", "mal", "mail", "cis male", "cis man","male (cis)",
+                            "man","maile", "malr") ~ "Male",
+      #Trans / Non-binary / Agender / Diverse / Other
+      Gender_cleaned%in% c("agender", "androgyne", "enby", "genderqueer", "female (trans)", "guy (-ish) ^_^") ~ "Other",
+      
+      # errors 
+      TRUE ~ NA_character_
+    )
+  )
+
+# cleaned_data|> select(Gender_cleaned) |> group_by(Gender_cleaned) |> summarise(n=n())  |> head(10) |> kable(format = "markdown")
+
+# str(cleaned_data)
+
+
+
+# reorder the levels in employee
+cleaned_data <- cleaned_data |>
+  mutate(
+    no_employees = factor(
+      no_employees, 
+      levels = c("1-5", "6-25", "26-100", "100-500", "500-1000", "More than 1000")
+    )
+  )
+
+cleaned_data <- cleaned_data |>
+  mutate(across(where(is.character), as.factor))
+
+
+
+# #recode NAs
+cleaned_data <- cleaned_data |>
+ mutate(
+ state_cleaned = if_else(Country != "United States", "Not applicable", state),
+work_interfere_cleaned = if_else(is.na(work_interfere), "Not applicable", work_interfere))
+
+# # cleaned_data |> write.csv("cleaned_data.csv")
+
+
+
+```
+
+# Summary Statistics of dataset: Demographics by Treatment
+
+```{r, echo=FALSE, warning=FALSE}
+
+cleaned_data |> tbl_summary(by=treatment, 
+            include=c(Age_cleaned, Gender_cleaned, self_employed,
+            family_history, work_interfere_cleaned),
+    type = list(self_employed~"categorical",
+                family_history~"categorical", 
+                work_interfere_cleaned~"categorical"),
+    statistic = list(all_continuous() ~ "{mean} ({sd})" ,
+                     all_categorical() ~ "{n} ({p}%)") ,
+    digits = list(all_continuous() ~ 1,
+                  all_categorical() ~ c(0, 1)), 
+      label = list(Age_cleaned ~ "Age",Gender_cleaned ~ "Gender",
+                   self_employed ~ "Self Employed",
+            family_history ~"Family History of Mental Illness",
+            work_interfere_cleaned~"Interfere with Ability to Work"),
+    missing = "no") |> bold_labels() |>  add_overall() |> 
+  modify_spanning_header(all_stat_cols() ~ "**Treatment for Mental Health**") |>
+  add_p(pvalue_fun = ~style_pvalue(., digits = 3)) |>  separate_p_footnotes() |>
+  bold_p() |>
+  gtsummary::as_flex_table() |>
+  flextable::font(fontname = "Times New Roman", part = "all") |>
+  flextable::fontsize(size = 12, part = "all") |>
+  flextable::autofit()
+   
+
+
+```
+
+There appear to be significant associations between treatment and Age, Gender, Family History of Mental Illness and whether having a mental health condition affected work.
+
+# Summary Statistics of dataset: Workplace Attitudes by Treatment
+
+```{r, echo=FALSE, warning=FALSE}
+
+cleaned_data |>
+  tbl_summary(by=treatment,include=c(no_employees, remote_work, tech_company, benefits,care_options, wellness_program, seek_help, anonymity, leave, mental_health_consequence, phys_health_consequence, coworkers,supervisor, mental_health_interview, phys_health_interview, mental_vs_physical, obs_consequence), 
+type = list(remote_work~"categorical", tech_company~"categorical",obs_consequence ~"categorical"),
+    statistic = list(all_continuous() ~ "{mean} ({sd})" ,
+                     all_categorical() ~ "{n} ({p}%)") ,
+    digits = list(all_continuous() ~ 1,
+                  all_categorical() ~ c(0, 1)), 
+      label = list(no_employees ~ "Number of Employees",remote_work ~ "Remote Work",
+                   tech_company~"Tech Company", care_options~"Care Options",
+                   wellness_program ~ "Wellness Program",
+                   seek_help ~ "Seek Help", benefits ~ "Benefits",
+                   anonymity~"Anonymity", 
+                   leave~"Leave",
+                   supervisor ~ "Supervisor",
+                   coworkers ~ "Coworkers",
+                  mental_health_consequence ~ "Mental Health Consequence", 
+                  phys_health_consequence ~ "Physical Health Consequence", 
+                  mental_health_interview ~ "Mental Health Interview", 
+                  phys_health_interview ~ "Physical Health Interview", 
+                  mental_vs_physical ~ "Mental vs Physical", 
+                  obs_consequence ~"Observed Negative Consequence" ),
+    missing = "no") |> bold_labels() |>  add_overall() |>
+  modify_spanning_header(all_stat_cols() ~ "**Treatment for Mental Health**") |> 
+  add_p(pvalue_fun = ~style_pvalue(., digits = 3)) |>  separate_p_footnotes() |>
+  bold_p() |>
+  gtsummary::as_flex_table() |>
+  flextable::font(fontname = "Times New Roman", part = "all") |>
+  flextable::fontsize(size = 12, part = "all") |>
+  flextable::autofit()
+   
+
+
+```
+
+There also seemed to be significant associations between treatment and:
+
+- workplace provided mental health benefits,
+
+- knew mental health care options in the workplace
+
+- employer discussed mental health as part of a wellness program
+
+- employer provided resources to learn more about mental health
+
+-  anonymity protected if using mental health services
+
+- how easy it was to take mental health leave
+
+- discussed mental health issues with employer had negative consequences
+
+- willing to discuss mental health issues with coworkers
+
+- willing to bring up mental health issues with a potential employer
+
+- see employer taking mental health as seriously as physical health
+
+- heard / observed negative consequences for coworkers with mental health conditions
+
+# Geographic Distribution of Responses
+
+```{r, echo=FALSE, warning=FALSE}
+locations <- cleaned_data |> 
+  mutate(Country = case_when(
+    Country %in% c("United States", "United States of America") ~ "USA",
+    TRUE ~ Country
+  )) |> 
+  group_by(Country) |> 
+  summarise(n = n())
+
+world_map <- map_data("world") |> 
+  rename(Country = region)
+
+map_data_joined <- world_map |> 
+  left_join(locations, by = "Country")
+
+ggplot(map_data_joined, aes(x = long, y = lat, group = group, fill = n)) +
+  geom_polygon(color = "white", linewidth = 0.1) +
+  scale_fill_viridis_c(option = "plasma", na.value = "gray90", name = "Responses") +
+  theme_void() +
+  labs(title = "Global Distribution of Survey Responses") +
+  coord_fixed(1.3)
+
+
+```
+
+Most respondents geographical disposition was the USA.
+
+# Logistic Regression Analysis of Factors affecting of Mental Health Treatment Behaviour
+
+Demographic, Perception and Attitude factors were modeled against treatment using a logistic regression model.
+
+```{r, echo=FALSE, warning=FALSE}
+
+cleaned_data_v2 <- cleaned_data |> mutate(age_centred = scale(cleaned_data$Age_cleaned, center = TRUE, scale = FALSE)) |> select(-Age_cleaned)
+
+# str(cleaned_data_v2)
+
+m1 <- glm(treatment ~ age_centred + Gender_cleaned + 
+            self_employed+ family_history+ work_interfere_cleaned+
+            no_employees+ remote_work + 
+            tech_company+ benefits+care_options+ wellness_program + 
+            seek_help+ anonymity+ leave+ mental_health_consequence+ 
+            phys_health_consequence+ coworkers+supervisor+ 
+            mental_health_interview+ phys_health_interview+ 
+            mental_vs_physical+ obs_consequence, family = binomial, data=cleaned_data_v2)
+
+m1_summary <- summary(m1)
+
+
+
+# 1-pchisq(m1_summary$deviance, m1_summary$df.residual)
+
+#levels(cleaned_data$treatment) #predicting the presence of treatment
+
+tbl_regression(m1, exponentiate = TRUE, intercept=TRUE,
+               label=list(age_centred ~ "Age (centred)",Gender_cleaned ~ "Gender",
+                   self_employed ~ "Self Employed",
+            family_history ~"Family History of Mental Illness",
+            work_interfere_cleaned~"Interfere with Ability to Work",
+                 no_employees ~ "Number of Employees",remote_work ~ "Remote Work",
+                   tech_company~"Tech Company", care_options~"Care Options",
+                   wellness_program ~ "Wellness Program",
+                   seek_help ~ "Seek Help", benefits ~ "Benefits",
+                   anonymity~"Anonymity", 
+                   leave~"Leave",
+                   supervisor ~ "Supervisor",
+                   coworkers ~ "Coworkers",
+                  mental_health_consequence ~ "Mental Health Consequence", 
+                  phys_health_consequence ~ "Physical Health Consequence", 
+                  mental_health_interview ~ "Mental Health Interview", 
+                  phys_health_interview ~ "Physical Health Interview", 
+                  mental_vs_physical ~ "Mental vs Physical", 
+                  obs_consequence ~"Observed Negative Consequence" ),
+            pvalue_fun = label_style_pvalue(digits=3)) |> bold_labels() |>
+  add_glance_source_note() |>
+  #add_global_p() |>  
+  bold_p() |>
+  gtsummary::as_flex_table() |>
+  flextable::font(fontname = "Times New Roman", part = "all") |>
+  flextable::fontsize(size = 12, part = "all") |> flextable::autofit()
+  # set_table_properties(layout = "autofit") |>
+  # width(width = 4) 
+
+#p value decimal places work when it is inside the tbl fn
+
+```
+
+# Forest Plot
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+
+plot_model(m1,
+           show.values = TRUE,
+           show.p      = TRUE,
+           p.threshold  = c(0.05),
+           value.size  = 2.5,
+           dot.size    = 1.5,
+           line.size   = 0.4,
+           colors      = "black",
+           vline.color = "grey50",
+           sort.est    = TRUE,
+           log.scale   = TRUE,
+           value.offset = 0.35,
+           title       = "Forest Plot of Logistic Regression") +
+  labs(x = "Odds Ratio", y = NULL) +
+  theme_bw(base_size = 10, base_family = "Times New Roman") +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.y        = element_text(size = 7),
+    plot.title         = element_text(size = 10)
+  )
+
+
+```
+
+A binary, logistic regression model was used to examine factors affecting mental health treatment seeking behaviour among 1220 respondents.
+This model used the logit link function and used the dependent variable of treatment, while using all demographic, attitudes and perception variables as independent variables.
+
+The residual deviance was 864.61 on 1174 degrees of freedom yielded p=1.000, which implied we do not reject the null hypothesis and the model was satisfactory.
+The model AIC was 957.
+Significant predictors of seeking mental health treatment in the workplace included demographic, workplace attitudes and perceptions.
+
+Demographic factors such as age, gender, family history of mental illness and interfered with ability to work were significant predictors in the model.
+Every one year increase from the mean age was associated with a 3% increase in odds of seeking treatment (OR=1.03, CI: 1.00, 1.06, p=0.019).
+Male respondents had a 53% odds lower treatment than the reference level of females, while holding the rest of predictors constant (OR=0.47, CI: 0.29, 0.74, p=0.002).
+Other respondents had 1.14 higher odds of treatment than females (OR=1.14, CI: 0.14, 25.0, p=0.914), however the confidence interval is large, implying possible few observations, which was a limitation.
+
+Having a family history of mental health illness, yielded 2.58 times higher odds of seeking treatment (OR=2.58, CI: 1.80, 3.71, p\<0.001), while respondents reporting their condition relative to never interfering with their work showed: those whose condition often interfered with their work reported 33.6 times higher odds (OR=33.6, CI: 17.0, 69.2, p\<0.001), those who reported sometimes interfered with their work showed 18.2 times higher odds (OR=18.2, CI: 11.0, 31.1, p\<0.001), those who reported rarely showed 12.6 higher odds (OR=12.6, CI: 7.10, 22.8, p\<0.001), while those who reported not applicable showed 91% lower odds than those who never reporting experiencing affecting their work (OR=0.09, CI: 11.0, 31.1, p\<0.001).
+
+The workplace and attitude factors that were significantly significant included employer provided mental health benefits, if employees knew their care options for mental health in the workplace, employer provided resources to learn more about mental health, anonymity protected if using mental health services, discussed mental health issues with employer had negative consequences and willing to discuss mental health issues with coworkers.
+
+Having mental health benefits (OR=1.99, CI: 1.18, 3.40, p=0.011) and caving care options (OR=2.03, CI: 1.27, 3.27, p=0.003) were associated with double the odds of treatment seeking behaviour.
+Those whose employer provided resources to learn more about mental health reported 56% lower odds in companion to those who did not know (OR=0.44, CI: 0.23, 0.84, p=0.012), while those whose employees did not provide resources however a 47% lower odds of seeking mental health treatment compared to those who did not know (OR=0.53, CI: 0.32, 0.89, p=0.016).
+
+Having anonymity protected was associated 78% higher odds of seeking mental health treatment (OR=1.78, CI: 1.12, 2.85, p=0.015).
+Those willing to discuss mental health issues with coworkers showed a 3.48 times the odds of seeking treatment compared to those who were not willing (OR=3.58, CI: 1.76, 7.38, p\<0.001).
+
+How easy it was to take mental health leave did not have an association with mental health treatment after controlling with other factors, conversely was seen when univariate testing.
+Company size, remote work status and tech company designation were not significant predictors in the model.
+
+# Appendix
+
+## Data Cleaning
+
+```{r, echo=FALSE, warning=FALSE}
+data |> select(Age) |> group_by(Age) |> summarise(n=n()) |> arrange(desc(Age)) |> head() |> kable(format = "markdown")
+
+
+data |> select(Age) |> group_by(Age) |> summarise(n=n()) |> arrange((Age))  |> head(10) |> kable(format = "markdown")
+
+
+data |> select(Gender) |> group_by(Gender) |> summarise(n=n())|> head(10) |> kable(format = "markdown")
+
+cleaned_data|> select(Gender_cleaned) |> group_by(Gender_cleaned) |> summarise(n=n())  |> head(10) |> kable(format = "markdown")
+
+
+```
+
+## p values double check gtsummary table
+
+```{r, echo=FALSE, warning=FALSE}
+
+# make it one table with all output
+
+
+target_vars <- c("Gender_cleaned", "self_employed","family_history","work_interfere_cleaned",
+                 "no_employees", "remote_work", "tech_company", "benefits","care_options", "wellness_program", "seek_help", "anonymity", "leave", "mental_health_consequence", "phys_health_consequence", "coworkers","supervisor", "mental_health_interview", "phys_health_interview", "mental_vs_physical", "obs_consequence") 
+
+results<- map_dfr(target_vars, function(var) {
+  test <- chisq.test(cleaned_data$treatment, cleaned_data[[var]], correct = FALSE)
+  
+  tidy(test) |> 
+    add_column(variable = var, .before = 1) |> 
+    add_column(pct_under_5 = mean(test$expected < 5) * 100)
+})
+
+kable(results, format = "markdown", caption = "Chi-Square Test Results")
+
+fisher.test(cleaned_data$treatment,cleaned_data$Gender_cleaned)
+
+
+
+group_by(cleaned_data, treatment) %>%
+  summarise(
+    count = n(),
+    mean = mean(Age_cleaned, na.rm = TRUE),
+    sd = sd(Age_cleaned, na.rm = TRUE)
+  )
+
+
+with(cleaned_data, shapiro.test(Age_cleaned[treatment == "Yes"]))
+
+with(cleaned_data, shapiro.test(Age_cleaned[treatment == "No"]))
+
+res.ftest <- var.test(cleaned_data$Age_cleaned ~ cleaned_data$treatment, data = cleaned_data)
+res.ftest
+
+# Base R plots side-by-side
+par(mfrow = c(1, 2))
+
+qqnorm(cleaned_data$Age_cleaned[cleaned_data$treatment == "Yes"], main = "Q-Q Plot: Treatment (Yes)")
+qqline(cleaned_data$Age_cleaned[cleaned_data$treatment == "Yes"], col = "red")
+
+qqnorm(cleaned_data$Age_cleaned[cleaned_data$treatment == "No"], main = "Q-Q Plot: Treatment (No)")
+qqline(cleaned_data$Age_cleaned[cleaned_data$treatment == "No"], col = "red")
+
+# Reset plotting layout
+par(mfrow = c(1, 1))
+
+
+wilcox.test(cleaned_data$Age_cleaned ~ cleaned_data$treatment)
+
+
+
+
+```
+
+## Logistic Regression Raw Output
+
+```{r, echo=FALSE, warning=FALSE}
+
+m1_summary
+
+# anova(m1, test="Chisq")
+```
+
+# References
+
+1.  Mental Health in Tech Survey [Internet]. [cited 2026 May 18]. Available from: <https://www.kaggle.com/datasets/osmi/mental-health-in-tech-survey>
+2.  Mental Health in Tech Analysis [Internet]. [cited 2026 May 18]. Available from: <https://kaggle.com/code/muhammadusmankhan0/mental-health-in-tech-analysis>
+3.  OSMI Mental Health in Tech Survey 2016 [Internet]. [cited 2026 May 18]. Available from: <https://www.kaggle.com/datasets/osmi/mental-health-in-tech-2016>
+4.  Unpaired Two-Samples T-test in R - Easy Guides - Wiki - STHDA [Internet]. [cited 2026 May 20]. Available from: <https://www.sthda.com/english/wiki/unpaired-two-samples-t-test-in-r>
+5.  tbl_regression() tutorial • gtsummary [Internet]. [cited 2026 May 23]. Available from: <https://www.danieldsjoberg.com/gtsummary/articles/tbl_regression.html>
+6.  Lennert F. Chapter 8 Describing data sets \| An(other) introduction to R [Internet]. [cited 2026 May 23]. Available from: <https://bookdown.org/f_lennert/introduction-to-r/descriptives.html>
+7.  Plotting Estimates (Fixed Effects) of Regression Models [Internet]. [cited 2026 May 23]. Available from: <https://strengejacke.github.io/sjPlot/articles/plot_model_estimates.html>
